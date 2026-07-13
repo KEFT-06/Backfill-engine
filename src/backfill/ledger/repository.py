@@ -1,17 +1,79 @@
 """Ledger repository — transactional claim / commit of partitions.
 
-🔑 STUB — the core of the whole project. You write claim_next() in Phase 2.
-
-The critical race: N workers pull work at the same time and must NEVER grab the
-same partition. The one-line idea is:
-
-    SELECT ... FROM ledger WHERE status = 'pending'
-    ORDER BY partition_key
-    FOR UPDATE SKIP LOCKED
-    LIMIT 1;
-
-...but the interview lives in the details: what happens on commit, on crash
-between claim and commit, on retry, on quarantine. Design it yourself first.
+🔑 The core of the project. claim_next() is what makes concurrency safe:
+multiple workers pull work at once and never grab the same partition.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
+from datetime import datetime
+from typing import Any
+
+import psycopg
+
+# Pick the oldest pending partition AND lock it in one step. FOR UPDATE locks the
+# row; SKIP LOCKED makes other workers skip rows already locked instead of waiting.
+CLAIM_SQL = """
+    SELECT partition_hour
+    FROM ledger
+    WHERE status = 'pending'
+    ORDER BY partition_hour
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+"""
+
+# Mark the claimed partition as taken. Once committed, 'running' (not the lock)
+# is what keeps other workers away during the long processing that follows.
+MARK_RUNNING_SQL = """
+    UPDATE ledger
+    SET status = 'running', attempts = attempts + 1, started_at = now()
+    WHERE partition_hour = %s
+"""
+
+
+def enqueue_partitions(conn: psycopg.Connection[Any], hours: Iterable[datetime]) -> None:
+    """Insert partitions as 'pending'. Idempotent: ON CONFLICT DO NOTHING."""
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO ledger (partition_hour) VALUES (%s) "
+            "ON CONFLICT (partition_hour) DO NOTHING",
+            [(h,) for h in hours],
+        )
+    conn.commit()
+
+
+def claim_next(conn: psycopg.Connection[Any]) -> datetime | None:
+    """Atomically claim the oldest pending partition, or return None if none left.
+
+    Everything happens in ONE short transaction (the `with conn.transaction()`):
+    the SELECT locks the row, the UPDATE marks it 'running', and the commit at
+    the end of the block releases the lock. No two workers can claim the same row.
+    """
+    with conn.transaction():
+        row = conn.execute(CLAIM_SQL).fetchone()
+        if row is None:
+            return None
+        partition_hour: datetime = row[0]
+        conn.execute(MARK_RUNNING_SQL, (partition_hour,))
+        return partition_hour
+
+
+# Finish a task successfully: flip 'running' -> 'done' and write the "receipt"
+# (rows produced + a checksum) that reconciliation will later verify.
+MARK_DONE_SQL = """
+    UPDATE ledger
+    SET status = 'done', rows_written = %s, checksum = %s, finished_at = now()
+    WHERE partition_hour = %s
+"""
+
+
+def mark_done(
+    conn: psycopg.Connection[Any],
+    partition_hour: datetime,
+    rows_written: int,
+    checksum: str,
+) -> None:
+    """Mark a partition as successfully done, recording its result for later proof."""
+    conn.execute(MARK_DONE_SQL, (rows_written, checksum, partition_hour))
+    conn.commit()
