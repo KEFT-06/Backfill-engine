@@ -1,0 +1,4 @@
+# Operational scripts, created in their phases:
+#   discover_schema_eras.py  (Phase 4) — walk history, detect schema breaks
+#   chaos_kill.py            (Phase 8) — kill the worker at a random instant
+#   seed.py                  (Phase 2) — seed the ledger with partitions

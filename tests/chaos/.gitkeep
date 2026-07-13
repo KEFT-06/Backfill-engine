@@ -1,0 +1,2 @@
+# Chaos tests: kill -> resume -> zero duplicate, zero gap, proven. Phase 8.
+# test_resume.py lands here.
