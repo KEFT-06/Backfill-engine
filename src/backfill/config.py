@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     )
 
     # --- Ledger (PostgreSQL) ---
-    pg_dsn: str = "postgresql://backfill:backfill@localhost:5432/backfill"
+    # Host port 5433: our container is mapped there to avoid a native PostgreSQL on 5432.
+    pg_dsn: str = "postgresql://backfill:backfill@localhost:5433/backfill"
 
     # --- Object store (MinIO / S3) ---
     s3_endpoint: str = "localhost:9000"
