@@ -59,7 +59,16 @@ Each incident follows the same four beats. Keep them short and honest.
 - **Correctif:** Redémarrer Docker Desktop (moteur), puis redémarrer le conteneur Postgres (`docker compose restart postgres`) pour balayer toutes les connexions fantômes d'un coup. Les données du ledger survivent (sur le volume disque).
 - **Leçon:** Sur Windows, éviter `docker exec` avec entrée standard (ça fige) — passer par une connexion réseau directe (psycopg). Et un process tué brutalement peut laisser un verrou orphelin en base : redémarrer le serveur nettoie tout.
 
+### INC-005 — Le worker se fige (puis plante) sur un téléchargement sans timeout
+
+- **Date:** 2026-07-14
+- **Phase:** 3
+- **Symptôme:** Pendant le vrai backfill, le worker s'est figé en plein téléchargement, puis a planté avec une `Fatal Python error: PyEval_SaveThread ... GIL` (pendant `do_handshake` SSL) quand un timeout externe l'a tué au bout de 180 s.
+- **Hypothèse:** Un bug de threading / GIL de Python, ou un problème d'installation SSL.
+- **Diagnostic:** L'erreur GIL n'était que l'agonie du process tué **en plein appel SSL** — pas la cause. La vraie cause : notre `urlopen(...)` n'avait **aucun timeout**. Quand une connexion meurt ou traîne sans rien renvoyer, Python attend **indéfiniment** → le worker se fige jusqu'à ce qu'on le tue. Le ledger a confirmé une partition bloquée en `running` à chaque mort.
+- **Correctif:** Ajouter un `timeout=30` à `urlopen` (constante `_TIMEOUT_SECONDS`). Un téléchargement bloqué lève désormais une erreur au bout de 30 s → attrapée par le runner → `mark_failed` → réessai. Confirmé : le backfill s'est terminé **24/24** après reprise.
+- **Leçon:** Tout appel réseau doit avoir un timeout. Sans lui, un seul téléchargement mort fige le worker entier — et le ledger + la reprise sont ce qui a permis de survivre à chaque plantage sans perdre de travail.
+
 ---
 
-<!-- Prochains incidents attendus en Phase 3 (le vrai backfill). -->
-
+<!-- Prochains incidents attendus en Phase 3 quand on élargira la plage (fichiers manquants, corrompus, dérive de schéma). -->
