@@ -77,3 +77,30 @@ def mark_done(
     """Mark a partition as successfully done, recording its result for later proof."""
     conn.execute(MARK_DONE_SQL, (rows_written, checksum, partition_hour))
     conn.commit()
+
+
+# On failure, one CASE decides everything: if it has already been attempted enough
+# times, quarantine it (a poison pill — set aside so the backfill keeps going);
+# otherwise put it back to 'pending' to be retried later.
+MARK_FAILED_SQL = """
+    UPDATE ledger
+    SET status = CASE WHEN attempts >= %s THEN 'quarantined' ELSE 'pending' END,
+        error = %s,
+        finished_at = now()
+    WHERE partition_hour = %s
+    RETURNING status
+"""
+
+
+def mark_failed(
+    conn: psycopg.Connection[Any],
+    partition_hour: datetime,
+    error: str,
+    max_attempts: int = 5,
+) -> str:
+    """Record a failure. Returns the new status: 'pending' (will retry) or
+    'quarantined' (poison pill, set aside; the backfill continues)."""
+    row = conn.execute(MARK_FAILED_SQL, (max_attempts, error, partition_hour)).fetchone()
+    conn.commit()
+    new_status: str = row[0] if row else "unknown"
+    return new_status
