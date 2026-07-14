@@ -14,6 +14,7 @@ from pathlib import Path
 import duckdb
 
 from backfill.parsers import registry
+from backfill.reconciliation import checksums
 from backfill.sources import gharchive
 
 
@@ -27,8 +28,8 @@ def partition_path(base: Path, hour: datetime) -> Path:
     )
 
 
-def ingest_hour(hour: datetime, work_dir: Path, output_dir: Path) -> int:
-    """Download -> transform -> write Parquet -> delete raw. Returns rows written."""
+def ingest_hour(hour: datetime, work_dir: Path, output_dir: Path) -> tuple[int, str]:
+    """Download -> transform -> write Parquet -> delete raw. Returns (rows, checksum)."""
     raw = gharchive.download(hour, work_dir)
     out = partition_path(output_dir, hour)
     tmp = out.with_name(out.name + ".tmp")
@@ -43,7 +44,8 @@ def ingest_hour(hour: datetime, work_dir: Path, output_dir: Path) -> int:
         con.execute(f"COPY ({select}) TO '{tmp.as_posix()}' (FORMAT PARQUET)")
         result = con.execute(f"SELECT count(*) FROM read_parquet('{tmp.as_posix()}')").fetchone()
         os.replace(tmp, out)
-        return int(result[0]) if result else 0
+        rows = int(result[0]) if result else 0
+        return rows, checksums.partition_checksum(out)
     finally:
         # Never retain raw — the <256 GB disk rule. Download -> process -> discard.
         raw.unlink(missing_ok=True)
@@ -56,5 +58,6 @@ def ingest_day(day: datetime, work_dir: Path, output_dir: Path) -> dict[int, int
     written: dict[int, int] = {}
     for h in range(24):
         hour = start + timedelta(hours=h)
-        written[hour.hour] = ingest_hour(hour, work_dir, output_dir)
+        rows, _ = ingest_hour(hour, work_dir, output_dir)
+        written[hour.hour] = rows
     return written

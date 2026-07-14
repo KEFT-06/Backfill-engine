@@ -28,8 +28,7 @@ def gharchive_processor(work_dir: Path, output_dir: Path) -> Processor:
     """The real processor: download → transform → write Parquet (Phase 1 pipeline)."""
 
     def process(hour: datetime) -> tuple[int, str]:
-        rows = ingest_hour(hour, work_dir, output_dir)
-        return rows, f"rows={rows}"  # placeholder checksum; real ones in Phase 6
+        return ingest_hour(hour, work_dir, output_dir)  # (rows, real checksum)
 
     return process
 
