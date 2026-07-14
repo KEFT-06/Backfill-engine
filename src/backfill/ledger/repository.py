@@ -20,8 +20,8 @@ CLAIM_SQL = """
     SELECT partition_hour
     FROM ledger
     WHERE status = 'pending'
-      AND (%(min_hour)s IS NULL OR partition_hour >= %(min_hour)s)
-      AND (%(max_hour)s IS NULL OR partition_hour <  %(max_hour)s)
+      AND (%(min_hour)s::timestamp IS NULL OR partition_hour >= %(min_hour)s::timestamp)
+      AND (%(max_hour)s::timestamp IS NULL OR partition_hour <  %(max_hour)s::timestamp)
     ORDER BY partition_hour
     LIMIT 1
     FOR UPDATE SKIP LOCKED
@@ -137,8 +137,8 @@ def requeue_stale_running(
         cur.execute(
             "UPDATE ledger SET status = 'pending' "
             "WHERE status = 'running' "
-            "  AND (%(min_hour)s IS NULL OR partition_hour >= %(min_hour)s) "
-            "  AND (%(max_hour)s IS NULL OR partition_hour <  %(max_hour)s)",
+            "  AND (%(min_hour)s::timestamp IS NULL OR partition_hour >= %(min_hour)s::timestamp) "
+            "  AND (%(max_hour)s::timestamp IS NULL OR partition_hour <  %(max_hour)s::timestamp)",
             {"min_hour": min_hour, "max_hour": max_hour},
         )
         reset = cur.rowcount
