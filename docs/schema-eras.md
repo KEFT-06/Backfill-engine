@@ -48,6 +48,27 @@ The lesson, twice over: **sample, don't assume.**
   tolerant extraction (e.g., `TRY`/coalesce) that normalizes both shapes to the
   stable output contract.
 
-## Decision
+## Decision (clean sweep 2026-07-14)
 
-_tbd — Karl's call, with a clean sweep. Do NOT assume; measure first._
+Three eras confirmed empirically:
+
+| Era | Range | `actor` | Whitelist maps how |
+|-----|-------|---------|--------------------|
+| modern | 2011, and 2015-onward | struct | `actor.login`, `repo.name`, real `id` |
+| old | 2012-01-01 → 2014-12-31 | string | `actor` **is** the login; `repository.name`; **no event id** |
+
+- **Strategy: versioned parsers** (`parsers/era_modern.py`, `parsers/era_2012_2014.py`),
+  routed by `parsers/registry.py`. Routing is a date **range** (old = [2012, 2015)),
+  not a cutoff, because the history is non-linear.
+- **Missing id in the old era: a synthetic, DETERMINISTIC hash** — `md5` of the
+  event's stable content (`created_at, type, actor, url, repository`). Deterministic so
+  that replaying a partition yields the same id (idempotence). Proven identical across
+  two passes.
+- **Output contract:** `id` is TEXT in both eras (modern id cast to VARCHAR), so the 5
+  output columns have identical types regardless of input era.
+
+Wired into the pipeline: `reference.ingest_hour` calls `registry.parser_for(hour)`, so
+the backfill transparently handles any era.
+
+**Open:** the lower boundary (exactly when 2011-modern → 2012-old) is approximate;
+confirm with a denser month-by-month sweep. The 2015-01-01 boundary is well documented.

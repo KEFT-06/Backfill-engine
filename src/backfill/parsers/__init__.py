@@ -1,12 +1,13 @@
 """🔑 Parsers — the intellectual core: schema drift over the years.
 
-The GH Archive event schema really drifted between 2011 and today. You will
-DISCOVER the eras yourself (scripts/discover_schema_eras.py, Phase 4), not guess
-them. The era_*.py filenames below are intentionally NOT created yet — their date
-boundaries come from your discovery, not from an a-priori assumption.
+The eras here were DISCOVERED empirically (scripts/discover_schema_eras.py), not
+guessed. The GH Archive event schema is non-linear: 2011 is in the modern format,
+2012-2014 is the old "Timeline API" format (actor is a plain string, `repository`
+not `repo`, no event id), and 2015+ is modern again.
 
-Planned modules (Phase 4):
-    base.py        common parser interface
-    registry.py    route a date to the right parser
-    era_*.py       one versioned parser per discovered era
+Modules:
+    base.py            Parser interface + the stable output contract (5 columns)
+    era_modern.py      2011 + 2015-onward ("Events API")
+    era_2012_2014.py   the old era (synthesises a deterministic id hash)
+    registry.py        route a date to the right parser (range test, not a cutoff)
 """

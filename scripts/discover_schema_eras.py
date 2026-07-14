@@ -35,16 +35,29 @@ def _whitelist_works(f: str) -> str:
     return "OK"
 
 
+def _actor_type(f: str) -> str:
+    row = duckdb.sql(f"SELECT typeof(actor) FROM read_json_auto('{f}') LIMIT 1").fetchone()
+    return str(row[0])[:48] if row else "?"
+
+
 def signature(path: Path) -> dict[str, str]:
     f = path.as_posix()
     cols = [r[0] for r in duckdb.sql(f"DESCRIBE SELECT * FROM read_json_auto('{f}')").fetchall()]
-    actor_type = duckdb.sql(f"SELECT typeof(actor) FROM read_json_auto('{f}') LIMIT 1").fetchone()
-    is_struct = bool(actor_type) and str(actor_type[0]).startswith("STRUCT")
     return {
         "columns": ",".join(sorted(cols)),
-        "actor_struct": "oui" if is_struct else "NON",
+        "actor_type": _actor_type(f),
         "whitelist": _whitelist_works(f),
     }
+
+
+def _download_with_retry(hour: datetime, work: Path, tries: int = 3) -> Path:
+    last: Exception | None = None
+    for _ in range(tries):
+        try:
+            return gharchive.download(hour, work)
+        except Exception as exc:  # noqa: BLE001 — flaky network, retry
+            last = exc
+    raise last if last else RuntimeError("download failed")
 
 
 def main() -> None:
@@ -54,13 +67,13 @@ def main() -> None:
         for year in YEARS:
             hour = datetime(year, 6, 15, 12)
             try:
-                path = gharchive.download(hour, work)
+                path = _download_with_retry(hour, work)
                 sig = signature(path)
                 path.unlink(missing_ok=True)
             except Exception as exc:
-                sig = {"columns": "?", "actor_struct": "?", "whitelist": f"INDISPO: {exc}"[:60]}
+                sig = {"columns": "?", "actor_type": "?", "whitelist": f"INDISPO: {exc}"[:50]}
             results.append((year, sig))
-            print(f"{year}: whitelist={sig['whitelist']:<12} actor_struct={sig['actor_struct']}")
+            print(f"{year}: whitelist={sig['whitelist']:<14} actor={sig['actor_type']}")
 
     print("\n=== Époques (regroupement par signature de colonnes) ===")
     prev: str | None = None

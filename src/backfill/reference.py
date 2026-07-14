@@ -12,20 +12,8 @@ from pathlib import Path
 
 import duckdb
 
+from backfill.parsers import registry
 from backfill.sources import gharchive
-
-# The business logic — YOUR transform. Kept as one readable constant so it stays
-# easy to own and change. NOTE: valid for the 2015-era schema (`actor` is a struct);
-# older eras drift, which is Phase 4.
-TRANSFORM_SQL = """
-    SELECT
-        id::BIGINT   AS id,
-        type         AS event_type,
-        actor.login  AS actor_login,
-        repo.name    AS repo_name,
-        created_at   AS created_at
-    FROM read_json_auto('{raw}')
-"""
 
 
 def partition_path(base: Path, hour: datetime) -> Path:
@@ -44,7 +32,8 @@ def ingest_hour(hour: datetime, work_dir: Path, output_dir: Path) -> int:
     try:
         out = partition_path(output_dir, hour)
         out.parent.mkdir(parents=True, exist_ok=True)
-        select = TRANSFORM_SQL.format(raw=raw.as_posix())
+        # Route the date to the right era parser (handles schema drift).
+        select = registry.parser_for(hour).sql(raw.as_posix())
         con = duckdb.connect()
         con.execute(f"COPY ({select}) TO '{out.as_posix()}' (FORMAT PARQUET)")
         result = con.execute(f"SELECT count(*) FROM read_parquet('{out.as_posix()}')").fetchone()
