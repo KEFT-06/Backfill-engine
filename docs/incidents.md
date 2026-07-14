@@ -29,6 +29,37 @@ Each incident follows the same four beats. Keep them short and honest.
 - **Correctif:** le ledger — un registre persistant dans PostgreSQL qui note le statut de chaque heure, pour reprendre via WHERE status != 'done'
 - **Leçon:** La reprise sur panne, c'est de l'état durable, pas une boucle for.
 
+### INC-002 — La source (GH Archive) refuse le User-Agent par défaut de Python (403)
+
+- **Date:** 2026-07-13
+- **Phase:** 1
+- **Symptôme:** Le téléchargement d'un fichier horaire échouait avec `HTTP 403 Forbidden` depuis Python (`urllib`), alors que `Invoke-WebRequest` (PowerShell) téléchargeait le même fichier sans problème.
+- **Hypothèse:** Un truc côté réseau ou droits d'accès au fichier.
+- **Diagnostic:** Le CDN de GH Archive (Fastly) filtre selon le `User-Agent`. Il bloque l'agent par défaut de Python (`Python-urllib/3.12`), qu'il prend pour un bot. Indice clé : ça marchait avec un outil mais pas l'autre → regarder les en-têtes HTTP envoyés.
+- **Correctif:** Envoyer un `User-Agent` d'apparence normale dans la requête. Confirmé : le téléchargement passe.
+- **Leçon:** Quand un outil télécharge et un autre non, compare ce que les deux envoient — souvent le User-Agent.
+
+### INC-003 — Le conteneur Docker Postgres masqué par un PostgreSQL natif sur le port 5432
+
+- **Date:** 2026-07-13
+- **Phase:** 2
+- **Symptôme:** Impossible de se connecter au ledger : `authentification par mot de passe échouée pour l'utilisateur backfill`, alors que le conteneur Docker tournait bien.
+- **Hypothèse:** Mauvais identifiants dans notre conteneur, ou conteneur mal démarré.
+- **Diagnostic:** Le message d'erreur était **en français** — or l'image `postgres:16` répond en anglais. Donc ce n'était pas notre conteneur qui répondait. `Get-Service` a révélé un service `postgresql-x64-16` **natif** qui occupait déjà `0.0.0.0:5432`. Toute connexion à `localhost:5432` tombait sur ce Postgres natif, pas sur le conteneur.
+- **Correctif:** Mapper le conteneur sur le port `5433` (docker-compose + config + .env). Confirmé : la migration s'applique et le ledger répond.
+- **Leçon:** Un port déjà occupé par un service préexistant fait qu'on se connecte silencieusement au mauvais serveur ; le symptôme (auth refusée) ne pointe pas la cause. Ici, la langue du message d'erreur a trahi le bon coupable.
+
+### INC-004 — Docker figé et connexions fantômes bloquant les commandes
+
+- **Date:** 2026-07-13
+- **Phase:** 2
+- **Symptôme:** Toutes les commandes `docker` (même `docker compose ps`) se figeaient. Plus tard, un `TRUNCATE ledger` restait bloqué indéfiniment.
+- **Hypothèse:** Un problème passager, ou une commande mal formée.
+- **Diagnostic:** Deux causes distinctes. (1) Le moteur Docker Desktop s'était bloqué à force de commandes `exec` interrompues. (2) Des scripts Python tués brutalement avaient laissé des connexions Postgres « fantômes » (idle-in-transaction) qui tenaient un verrou sur `ledger` ; `TRUNCATE` (verrou exclusif) attendait ces verrous pour toujours.
+- **Correctif:** Redémarrer Docker Desktop (moteur), puis redémarrer le conteneur Postgres (`docker compose restart postgres`) pour balayer toutes les connexions fantômes d'un coup. Les données du ledger survivent (sur le volume disque).
+- **Leçon:** Sur Windows, éviter `docker exec` avec entrée standard (ça fige) — passer par une connexion réseau directe (psycopg). Et un process tué brutalement peut laisser un verrou orphelin en base : redémarrer le serveur nettoie tout.
+
 ---
 
-<!-- Real incidents start below. First ones expected in Phase 3. -->
+<!-- Prochains incidents attendus en Phase 3 (le vrai backfill). -->
+
