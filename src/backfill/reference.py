@@ -7,6 +7,7 @@ that arrives in Phase 2. This is the "before" state on purpose.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -29,18 +30,24 @@ def partition_path(base: Path, hour: datetime) -> Path:
 def ingest_hour(hour: datetime, work_dir: Path, output_dir: Path) -> int:
     """Download -> transform -> write Parquet -> delete raw. Returns rows written."""
     raw = gharchive.download(hour, work_dir)
+    out = partition_path(output_dir, hour)
+    tmp = out.with_name(out.name + ".tmp")
     try:
-        out = partition_path(output_dir, hour)
         out.parent.mkdir(parents=True, exist_ok=True)
         # Route the date to the right era parser (handles schema drift).
         select = registry.parser_for(hour).sql(raw.as_posix())
         con = duckdb.connect()
-        con.execute(f"COPY ({select}) TO '{out.as_posix()}' (FORMAT PARQUET)")
-        result = con.execute(f"SELECT count(*) FROM read_parquet('{out.as_posix()}')").fetchone()
+        # Atomic swap: write to a temp file, then os.replace over the final path.
+        # A reader sees the old-or-new file, never a partial one; a crash mid-write
+        # leaves only the .tmp, so the final partition is never corrupt (ADR 005).
+        con.execute(f"COPY ({select}) TO '{tmp.as_posix()}' (FORMAT PARQUET)")
+        result = con.execute(f"SELECT count(*) FROM read_parquet('{tmp.as_posix()}')").fetchone()
+        os.replace(tmp, out)
         return int(result[0]) if result else 0
     finally:
         # Never retain raw — the <256 GB disk rule. Download -> process -> discard.
         raw.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)  # leftover temp on failure — the final stays intact
 
 
 def ingest_day(day: datetime, work_dir: Path, output_dir: Path) -> dict[int, int]:
