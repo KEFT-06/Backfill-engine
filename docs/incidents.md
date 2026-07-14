@@ -69,6 +69,26 @@ Each incident follows the same four beats. Keep them short and honest.
 - **Correctif:** Ajouter un `timeout=30` à `urlopen` (constante `_TIMEOUT_SECONDS`). Un téléchargement bloqué lève désormais une erreur au bout de 30 s → attrapée par le runner → `mark_failed` → réessai. Confirmé : le backfill s'est terminé **24/24** après reprise.
 - **Leçon:** Tout appel réseau doit avoir un timeout. Sans lui, un seul téléchargement mort fige le worker entier — et le ledger + la reprise sont ce qui a permis de survivre à chaque plantage sans perdre de travail.
 
+### INC-006 — Paramètre SQL NULL sans type : bug attrapé par le test, pas par mypy
+
+- **Date:** 2026-07-14
+- **Phase:** 5
+- **Symptôme:** La preuve d'isolation plantait avec `psycopg.errors.AmbiguousParameter: could not determine data type of parameter $2` sur la ligne `partition_hour < $2`.
+- **Hypothèse:** Une faute de syntaxe dans ma requête de plage.
+- **Diagnostic:** Les bornes `min_hour` / `max_hour` peuvent valoir `NULL`. Dans `(%(max_hour)s IS NULL OR partition_hour < %(max_hour)s)`, quand le paramètre est NULL, Postgres ne peut pas **deviner son type** (NULL n'a pas de type) → erreur. mypy ne pouvait pas le voir (c'est du SQL, pas du Python typé) ; c'est le **test d'intégration live** qui l'a révélé.
+- **Correctif:** Caster explicitement les paramètres en `::timestamp` dans les deux requêtes de plage (`claim_next`, `requeue_stale_running`). Confirmé : la preuve d'isolation passe (latence plate, 0 partition commune).
+- **Leçon:** Un paramètre NULL a besoin d'un indice de type explicite en SQL. Et surtout : les types (mypy) vérifient la **forme**, les tests vérifient le **comportement** — l'un n'attrape pas ce que l'autre voit.
+
+### INC-007 — Moteur Docker Desktop coincé au démarrage : le reboot comme seul remède
+
+- **Date:** 2026-07-14
+- **Phase:** 5
+- **Symptôme:** Impossible de lancer le ledger : toute commande docker échouait/hangeait, `docker compose restart` renvoyait `failed to connect to the docker API at npipe:...` (daemon absent). Le moteur ne démarrait pas même après relance de Docker Desktop + plusieurs minutes d'attente.
+- **Hypothèse:** Le conteneur est juste éteint, il faut attendre le démarrage.
+- **Diagnostic:** Le **moteur** Docker Desktop (backend WSL) était coincé au démarrage : les process de l'application tournaient, mais le daemon ne répondait pas. Le reset en ligne de commande (kill + relance) n'a **pas** suffi.
+- **Correctif:** Redémarrer la machine. Au reboot, le moteur repart proprement ; les données (ledger, volumes) survivent. Postgres est revenu `healthy` sur 5433 et la preuve d'isolation a pu tourner.
+- **Leçon:** Quand le backend WSL de Docker est coincé au démarrage sur Windows, ne pas s'acharner en CLI — un reboot est le remède fiable. L'environnement local peut être le maillon faible d'un projet, autant le savoir.
+
 ---
 
-<!-- Prochains incidents attendus en Phase 3 quand on élargira la plage (fichiers manquants, corrompus, dérive de schéma). -->
+<!-- Prochains incidents attendus : Phase 3 élargie (fichiers manquants/corrompus), Phase 6 (écarts de réconciliation). -->
