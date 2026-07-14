@@ -104,3 +104,19 @@ def mark_failed(
     conn.commit()
     new_status: str = row[0] if row else "unknown"
     return new_status
+
+
+def requeue_stale_running(conn: psycopg.Connection[Any]) -> int:
+    """Reset partitions stuck in 'running' (a worker crashed mid-processing) back to
+    'pending', so they get reprocessed instead of being lost forever. Returns how
+    many were reset.
+
+    Single-runner assumption: it resets ALL 'running' rows. With several concurrent
+    runners you'd gate this on a staleness timeout / heartbeat so you don't reset a
+    healthy peer's in-flight work.
+    """
+    with conn.cursor() as cur:
+        cur.execute("UPDATE ledger SET status = 'pending' WHERE status = 'running'")
+        reset = cur.rowcount
+    conn.commit()
+    return reset
