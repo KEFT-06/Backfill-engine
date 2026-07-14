@@ -38,16 +38,19 @@ def run(
     conn: psycopg.Connection[Any],
     process: Processor,
     max_attempts: int = 5,
+    min_hour: datetime | None = None,
+    max_hour: datetime | None = None,
 ) -> dict[str, int]:
-    """Drain the ledger until no pending work remains. Returns {'done', 'failed'}.
+    """Drain the ledger of pending work in [min_hour, max_hour). Returns {'done','failed'}.
 
     First recovers any partition orphaned in 'running' by a previous crash — that
-    is what makes a restart resume instead of leaving a gap.
+    is what makes a restart resume instead of leaving a gap. The [min_hour, max_hour)
+    bounds keep the hot path and the backfill on disjoint date ranges (Phase 5).
     """
-    repository.requeue_stale_running(conn)
+    repository.requeue_stale_running(conn, min_hour, max_hour)
     stats = {"done": 0, "failed": 0}
     while True:
-        hour = repository.claim_next(conn)
+        hour = repository.claim_next(conn, min_hour, max_hour)
         if hour is None:
             break
         try:
