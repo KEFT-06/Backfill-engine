@@ -32,12 +32,14 @@ test:          ## Run the test suite
 
 check: lint type test   ## Everything CI runs, locally
 
-# --- Filled in later phases ---
-backfill:      ## Phase 3+: run the historical backfill
-	@echo "TODO — Phase 3"
+backfill:      ## Run the historical backfill (edit the window in pipelines/backfill.py)
+	uv run python -m pipelines.backfill
 
-chaos:         ## Phase 8: kill a worker mid-run, resume, prove zero-dup/zero-gap
-	@echo "TODO — Phase 8"
+chaos:         ## Kill a worker mid-run, resume, prove zero-dup/zero-gap (~10s)
+	uv run python scripts/chaos_kill.py
 
-reconcile:     ## Phase 6: generate the reconciliation report
-	@echo "TODO — Phase 6"
+reconcile:     ## Generate the reconciliation report (ledger vs storage)
+	uv run python scripts/reconcile.py
+
+discover:      ## Discover the schema eras empirically
+	uv run python scripts/discover_schema_eras.py
