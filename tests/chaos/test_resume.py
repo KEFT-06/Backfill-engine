@@ -52,14 +52,21 @@ def test_kill_and_resume_no_gap_no_dup() -> None:
         with pytest.raises(_Killed):
             worker.run(conn, killing)
 
-        # One partition is orphaned in 'running'; the rest are done/pending.
+        # h0,h1,h2 are 'done'; h3 is orphaned in 'running'; h4..h9 are 'pending'.
         running = conn.execute("SELECT count(*) FROM ledger WHERE status = 'running'").fetchone()
         assert running is not None and running[0] == 1
 
-        # Restart: requeue the orphan, then finish everything.
-        worker.run(conn, lambda hour: (1, "ok"))
+        # Restart: requeue the orphan, then finish everything — tracking what it touches.
+        resumed: list[datetime] = []
 
-        assert _status_counts(conn) == {"done": 10}   # zero gap: every partition finished
-        assert set(hours) <= set(seen)        # every partition was actually processed
+        def finishing(hour: datetime) -> tuple[int, str]:
+            resumed.append(hour)
+            return 1, "ok"
+
+        worker.run(conn, finishing)
+
+        assert _status_counts(conn) == {"done": 10}      # zero gap: every partition finished
+        assert set(resumed) == set(hours[3:])            # resume did ONLY the remaining work
+        assert not set(resumed) & set(hours[:3])         # never re-did the already-'done' ones
     finally:
         conn.close()
