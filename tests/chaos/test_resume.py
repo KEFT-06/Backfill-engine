@@ -18,6 +18,11 @@ class _Killed(BaseException):
     """Escapes the runner's `except Exception` — simulates a real process kill."""
 
 
+def _status_counts(conn: psycopg.Connection[tuple[object, ...]]) -> dict[str, int]:
+    rows = conn.execute("SELECT status, count(*) FROM ledger GROUP BY status").fetchall()
+    return {str(s): int(str(n)) for s, n in rows}
+
+
 def _connect() -> psycopg.Connection[tuple[object, ...]]:
     try:
         return psycopg.connect(
@@ -54,8 +59,7 @@ def test_kill_and_resume_no_gap_no_dup() -> None:
         # Restart: requeue the orphan, then finish everything.
         worker.run(conn, lambda hour: (1, "ok"))
 
-        statuses = dict(conn.execute("SELECT status, count(*) FROM ledger GROUP BY status").fetchall())
-        assert statuses == {"done": 10}       # zero gap: every partition finished
+        assert _status_counts(conn) == {"done": 10}   # zero gap: every partition finished
         assert set(hours) <= set(seen)        # every partition was actually processed
     finally:
         conn.close()

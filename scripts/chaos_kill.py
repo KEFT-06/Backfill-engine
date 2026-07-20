@@ -19,6 +19,11 @@ class _Killed(BaseException):
     """Escapes the runner's `except Exception` — simulates a real process kill."""
 
 
+def _counts(conn: psycopg.Connection) -> dict[str, int]:
+    rows = conn.execute("SELECT status, count(*) FROM ledger GROUP BY status").fetchall()
+    return {str(s): int(n) for s, n in rows}
+
+
 def main() -> None:
     hours = [datetime(2017, 1, 1) + timedelta(hours=h) for h in range(12)]
     with psycopg.connect(DSN) as conn:
@@ -38,12 +43,12 @@ def main() -> None:
         try:
             worker.run(conn, killing)
         except _Killed:
-            counts = dict(conn.execute("SELECT status, count(*) FROM ledger GROUP BY status").fetchall())
+            counts = _counts(conn)
             print(f"  💥 TUE apres {len(seen)} partitions. Etat du ledger : {counts}")
 
         print("Redemarrage du worker...")
         worker.run(conn, lambda hour: (1, "ok"))
-        counts = dict(conn.execute("SELECT status, count(*) FROM ledger GROUP BY status").fetchall())
+        counts = _counts(conn)
         print(f"  Etat final : {counts}")
 
         assert counts == {"done": 12}, counts
